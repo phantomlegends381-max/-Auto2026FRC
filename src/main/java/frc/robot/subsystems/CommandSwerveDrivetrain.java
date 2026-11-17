@@ -26,6 +26,8 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Notifier;
 import edu.wpi.first.wpilibj.RobotController;
+import edu.wpi.first.networktables.NetworkTableInstance;
+import edu.wpi.first.networktables.StructPublisher;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
@@ -96,6 +98,10 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     );
 
     private SysIdRoutine m_sysIdRoutineToApply = m_sysIdRoutineTranslation;
+    private final LimelightSim m_limelightSim = Utils.isSimulation() ? new LimelightSim() : null;
+    private boolean m_pathPlannerConfigured = false;
+    private final StructPublisher<Pose2d> m_odometryPosePublisher = NetworkTableInstance.getDefault()
+        .getStructTopic("Odometry/EstimatedPose", Pose2d.struct).publish();
 
     public CommandSwerveDrivetrain(
         SwerveDrivetrainConstants drivetrainConstants,
@@ -154,9 +160,14 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
                 () -> DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red,
                 this
             );
+            m_pathPlannerConfigured = true;
         } catch (Exception ex) {
             DriverStation.reportError("Failed to load PathPlanner config and configure AutoBuilder", ex.getStackTrace());
         }
+    }
+
+    public boolean isPathPlannerConfigured() {
+        return m_pathPlannerConfigured;
     }
 
     public Command applyRequest(Supplier<SwerveRequest> requestSupplier) {
@@ -173,6 +184,8 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
 
     @Override
     public void periodic() {
+        var pose = getState().Pose;
+        m_odometryPosePublisher.set(pose);
         if (!m_hasAppliedOperatorPerspective || DriverStation.isDisabled()) {
             DriverStation.getAlliance().ifPresent(allianceColor -> {
                 setOperatorPerspectiveForward(
@@ -185,6 +198,13 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
         }
 
         updateVisionPose();
+    }
+
+    /** Advances desktop vision simulation from the drivetrain's simulated ground truth. */
+    public void simulationPeriodic() {
+        if (m_limelightSim != null) {
+            m_limelightSim.update(getState().Pose);
+        }
     }
 
     private void updateVisionPose() {

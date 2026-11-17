@@ -18,6 +18,11 @@ public class Robot extends TimedRobot {
     }
 
     @Override
+    public void simulationPeriodic() {
+        m_robotContainer.drivetrain.simulationPeriodic();
+    }
+
+    @Override
     public void autonomousInit() {
         m_autonomousCommand = m_robotContainer.getAutonomousCommand();
 

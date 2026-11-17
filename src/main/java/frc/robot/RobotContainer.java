@@ -35,7 +35,12 @@ public class RobotContainer {
     private final SendableChooser<Command> autoChooser;
 
     public RobotContainer() {
-        autoChooser = AutoBuilder.buildAutoChooser();
+        autoChooser = drivetrain.isPathPlannerConfigured()
+            ? AutoBuilder.buildAutoChooser()
+            : new SendableChooser<>();
+        if (!drivetrain.isPathPlannerConfigured()) {
+            SmartDashboard.putString("Auto Mode Status", "PathPlanner settings.json missing; autonomous unavailable");
+        }
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         configureBindings();
