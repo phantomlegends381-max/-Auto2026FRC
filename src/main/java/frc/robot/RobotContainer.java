@@ -1,45 +1,69 @@
 package frc.robot;
 
+import static edu.wpi.first.units.Units.*;
+
+import com.ctre.phoenix6.swerve.SwerveModule.DriveRequestType;
+import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
-import edu.wpi.first.wpilibj.XboxController;
-import edu.wpi.first.wpilibj.smartdashboard.Field2d;
+
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
-import edu.wpi.first.wpilibj2.command.RunCommand;
-import edu.wpi.first.wpilibj2.command.Commands;
+import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
+
+import frc.robot.generated.TunerConstants;
+import frc.robot.subsystems.CommandSwerveDrivetrain;
 
 public class RobotContainer {
-  private final DriveSubsystem drive = new DriveSubsystem();
-  private final XboxController controller = new XboxController(0);
-  private final SendableChooser<Command> autoChooser;
-  private final Field2d field = new Field2d();
+    private double MaxSpeed = TunerConstants.kSpeedAt12Volts.in(MetersPerSecond);
+    private double MaxAngularRate = RotationsPerSecond.of(0.75).in(RadiansPerSecond);
 
-  public RobotContainer() {
-    drive.setDefaultCommand(new RunCommand(
-        () -> drive.drive(controller.getLeftY(), controller.getLeftX(), controller.getRightX()), drive));
-    autoChooser = AutoBuilder.buildAutoChooser();
-    autoChooser.setDefaultOption("Drive Forward", driveFor(0.7, 0.0));
-    autoChooser.addOption("Drive Backward", driveFor(-0.7, 0.0));
-    autoChooser.addOption("Drive Left", driveFor(0.0, 0.7));
-    autoChooser.addOption("Drive Right", driveFor(0.0, -0.7));
-    SmartDashboard.putData("Auto Chooser", autoChooser);
-    SmartDashboard.putData("Field", field);
-  }
+    private final SwerveRequest.FieldCentric drive = new SwerveRequest.FieldCentric()
+        .withDeadband(MaxSpeed * 0.1)
+        .withRotationalDeadband(MaxAngularRate * 0.1)
+        .withDriveRequestType(DriveRequestType.OpenLoopVoltage);
 
-  public Command getAutonomousCommand() {
-    return autoChooser.getSelected();
-  }
+    private final SwerveRequest.SwerveDriveBrake brake = new SwerveRequest.SwerveDriveBrake();
+    private final SwerveRequest.PointWheelsAt point = new SwerveRequest.PointWheelsAt();
 
-  private Command driveFor(double forward, double strafe) {
-    return Commands.run(() -> drive.driveRobotRelative(
-        new edu.wpi.first.math.kinematics.ChassisSpeeds(forward, strafe, 0.0)), drive)
-        .withTimeout(2.0)
-        .finallyDo(interrupted -> drive.driveRobotRelative(
-            new edu.wpi.first.math.kinematics.ChassisSpeeds()));
-  }
+    private final CommandXboxController joystick = new CommandXboxController(0);
 
-  public void updateField() {
-    field.setRobotPose(drive.getPose());
-  }
+    public final CommandSwerveDrivetrain drivetrain = TunerConstants.createDrivetrain();
+
+    private final SendableChooser<Command> autoChooser;
+
+    public RobotContainer() {
+        autoChooser = AutoBuilder.buildAutoChooser();
+        SmartDashboard.putData("Auto Mode", autoChooser);
+
+        configureBindings();
+    }
+
+    private void configureBindings() {
+        drivetrain.setDefaultCommand(
+            drivetrain.applyRequest(() ->
+                drive.withVelocityX(-joystick.getLeftY() * MaxSpeed)
+                    .withVelocityY(-joystick.getLeftX() * MaxSpeed)
+                    .withRotationalRate(-joystick.getRightX() * MaxAngularRate)
+            )
+        );
+
+        joystick.a().whileTrue(drivetrain.applyRequest(() -> brake));
+        joystick.b().whileTrue(drivetrain.applyRequest(() ->
+            point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), -joystick.getLeftX()))
+        ));
+
+        joystick.back().and(joystick.y()).whileTrue(drivetrain.sysIdDynamic(Direction.kForward));
+        joystick.back().and(joystick.x()).whileTrue(drivetrain.sysIdDynamic(Direction.kReverse));
+        joystick.start().and(joystick.y()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kForward));
+        joystick.start().and(joystick.x()).whileTrue(drivetrain.sysIdQuasistatic(Direction.kReverse));
+
+        joystick.leftBumper().onTrue(drivetrain.runOnce(() -> drivetrain.seedFieldCentric()));
+    }
+
+    public Command getAutonomousCommand() {
+        return autoChooser.getSelected();
+    }
 }
