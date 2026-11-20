@@ -7,12 +7,15 @@ import com.ctre.phoenix6.swerve.SwerveRequest;
 import com.pathplanner.lib.auto.AutoBuilder;
 
 import edu.wpi.first.math.geometry.Rotation2d;
+import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.button.CommandXboxController;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 
+import frc.robot.commands.AutonomousFSMCommand;
+import frc.robot.commands.AprilTagApproachCommand;
 import frc.robot.generated.TunerConstants;
 import frc.robot.subsystems.CommandSwerveDrivetrain;
 
@@ -41,6 +44,12 @@ public class RobotContainer {
         if (!drivetrain.isPathPlannerConfigured()) {
             SmartDashboard.putString("Auto Mode Status", "PathPlanner settings.json missing; autonomous unavailable");
         }
+        autoChooser.addOption("Approach Visible AprilTag", new AprilTagApproachCommand(drivetrain));
+        SmartDashboard.putNumber("AprilTag Target ID", 0);
+        autoChooser.addOption("Approach Specific AprilTag", new AprilTagApproachCommand(
+            drivetrain,
+            () -> (int) Math.round(SmartDashboard.getNumber("AprilTag Target ID", 0))
+        ));
         SmartDashboard.putData("Auto Mode", autoChooser);
 
         configureBindings();
@@ -48,14 +57,20 @@ public class RobotContainer {
 
     private void configureBindings() {
         drivetrain.setDefaultCommand(
-            drivetrain.applyRequest(() ->
-                drive.withVelocityX(-joystick.getLeftY() * MaxSpeed)
+            drivetrain.applyRequest(() -> {
+                if (DriverStation.isAutonomousEnabled()) return brake;
+                return drive.withVelocityX(-joystick.getLeftY() * MaxSpeed)
                     .withVelocityY(-joystick.getLeftX() * MaxSpeed)
-                    .withRotationalRate(-joystick.getRightX() * MaxAngularRate)
-            )
+                    .withRotationalRate(-joystick.getRightX() * MaxAngularRate);
+            })
         );
 
         joystick.a().whileTrue(drivetrain.applyRequest(() -> brake));
+        joystick.rightBumper().whileTrue(new AprilTagApproachCommand(drivetrain));
+        joystick.leftTrigger().whileTrue(new AprilTagApproachCommand(
+            drivetrain,
+            () -> (int) Math.round(SmartDashboard.getNumber("AprilTag Target ID", 0))
+        ));
         joystick.b().whileTrue(drivetrain.applyRequest(() ->
             point.withModuleDirection(new Rotation2d(-joystick.getLeftY(), -joystick.getLeftX()))
         ));
@@ -69,6 +84,10 @@ public class RobotContainer {
     }
 
     public Command getAutonomousCommand() {
-        return autoChooser.getSelected();
+        return new AutonomousFSMCommand(
+            autoChooser::getSelected,
+            () -> drivetrain.setControl(brake),
+            drivetrain
+        ).withName("Autonomous FSM");
     }
 }

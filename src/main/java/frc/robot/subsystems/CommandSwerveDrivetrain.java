@@ -15,6 +15,8 @@ import com.pathplanner.lib.config.PIDConstants;
 import com.pathplanner.lib.config.RobotConfig;
 import com.pathplanner.lib.controllers.PPHolonomicDriveController;
 
+import edu.wpi.first.apriltag.AprilTagFieldLayout;
+import edu.wpi.first.apriltag.AprilTagFields;
 import edu.wpi.first.math.Matrix;
 import edu.wpi.first.math.VecBuilder;
 import edu.wpi.first.math.geometry.Pose2d;
@@ -37,6 +39,7 @@ import frc.robot.generated.TunerConstants.TunerSwerveDrivetrain;
 
 public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Subsystem {
     private static final String LIMELIGHT_NAME = "limelight";
+    private static final AprilTagFieldLayout FIELD_LAYOUT = AprilTagFieldLayout.loadField(AprilTagFields.kDefaultField);
 
     private static final double kSimLoopPeriod = 0.005;
     private Notifier m_simNotifier = null;
@@ -210,17 +213,50 @@ public class CommandSwerveDrivetrain extends TunerSwerveDrivetrain implements Su
     private void updateVisionPose() {
         var driveState = getState();
         double headingDeg = driveState.Pose.getRotation().getDegrees();
-        double omegaRps = Units.radiansToRotations(driveState.Speeds.omegaRadiansPerSecond);
+        double omegaRadPerSec = driveState.Speeds.omegaRadiansPerSecond;
 
-        LimelightHelpers.SetRobotOrientation(LIMELIGHT_NAME, headingDeg, 0, 0, 0, 0, 0);
+        LimelightHelpers.SetRobotOrientation(
+            LIMELIGHT_NAME,
+            headingDeg,
+            Math.toDegrees(omegaRadPerSec),
+            0, 0, 0, 0
+        );
 
         LimelightHelpers.PoseEstimate mt2 = LimelightHelpers.getBotPoseEstimate_wpiBlue_MegaTag2(LIMELIGHT_NAME);
 
-        if (mt2 == null || mt2.tagCount == 0 || Math.abs(omegaRps) > 2.0) {
+        if (mt2 == null
+            || !LimelightHelpers.getTV(LIMELIGHT_NAME)
+            || !mt2.isMegaTag2
+            || mt2.tagCount <= 0
+            || Math.abs(omegaRadPerSec) > 2.0
+            || mt2.pose == null
+            || !Double.isFinite(mt2.pose.getX())
+            || !Double.isFinite(mt2.pose.getY())
+            || !Double.isFinite(mt2.pose.getRotation().getRadians())
+            || mt2.pose.getX() < 0.0
+            || mt2.pose.getX() > FIELD_LAYOUT.getFieldLength()
+            || mt2.pose.getY() < 0.0
+            || mt2.pose.getY() > FIELD_LAYOUT.getFieldWidth()
+            || !Double.isFinite(mt2.timestampSeconds)
+            || !Double.isFinite(mt2.latency)
+            || mt2.latency < 0.0
+            || !Double.isFinite(mt2.avgTagDist)
+            || mt2.avgTagDist <= 0.0
+            || mt2.avgTagDist > 8.0) {
             return;
         }
 
-        setVisionMeasurementStdDevs(VecBuilder.fill(0.7, 0.7, 9999999));
+        double poseJumpMeters = mt2.pose.getTranslation().getDistance(driveState.Pose.getTranslation());
+        double maxPlausibleJumpMeters = 0.75
+            + Math.hypot(driveState.Speeds.vxMetersPerSecond, driveState.Speeds.vyMetersPerSecond)
+                * (mt2.latency / 1000.0 + 0.25);
+        if (!Double.isFinite(poseJumpMeters) || poseJumpMeters > maxPlausibleJumpMeters) return;
+
+        double xyStdDev = Math.max(
+            0.15,
+            Math.min(2.0, 0.10 * mt2.avgTagDist * mt2.avgTagDist / Math.sqrt(mt2.tagCount))
+        );
+        setVisionMeasurementStdDevs(VecBuilder.fill(xyStdDev, xyStdDev, 9999999));
         addVisionMeasurement(mt2.pose, mt2.timestampSeconds);
     }
 
